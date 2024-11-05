@@ -3,7 +3,6 @@ package gopom
 import (
 	"encoding/xml"
 	"io"
-	"io/ioutil"
 	"os"
 )
 
@@ -14,7 +13,7 @@ func Parse(path string) (*Project, error) {
 	}
 	defer file.Close()
 
-	b, _ := ioutil.ReadAll(file)
+	b, _ := io.ReadAll(file)
 	var project Project
 
 	err = xml.Unmarshal(b, &project)
@@ -25,9 +24,9 @@ func Parse(path string) (*Project, error) {
 }
 
 func ParseFromReader(reader io.Reader) (*Project, error) {
-	b, _ := ioutil.ReadAll(reader)
+	b, _ := io.ReadAll(reader)
 	var project Project
-
+ 
 	err := xml.Unmarshal(b, &project)
 	if err != nil {
 		return nil, err
@@ -36,7 +35,10 @@ func ParseFromReader(reader io.Reader) (*Project, error) {
 }
 
 type Project struct {
-	XMLName                *xml.Name               `xml:"project,omitempty"`
+	XMLName                xml.Name                `xml:"project,omitempty"`
+	XmlNS                  xml.Attr                `xml:"xmlns,attr,omitempty"`
+	XSI                    xml.Attr                `xml:"xmlns:xsi,attr,omitempty"`
+	SchemaLocation         xml.Attr                `xml:"xsi:schemaLocation,attr,omitempty"`
 	ModelVersion           *string                 `xml:"modelVersion,omitempty"`
 	Parent                 *Parent                 `xml:"parent,omitempty"`
 	GroupID                *string                 `xml:"groupId,omitempty"`
