@@ -2,6 +2,7 @@ package gopom
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"os"
 )
@@ -26,7 +27,7 @@ func Parse(path string) (*Project, error) {
 func ParseFromReader(reader io.Reader) (*Project, error) {
 	b, _ := io.ReadAll(reader)
 	var project Project
- 
+
 	err := xml.Unmarshal(b, &project)
 	if err != nil {
 		return nil, err
@@ -35,10 +36,8 @@ func ParseFromReader(reader io.Reader) (*Project, error) {
 }
 
 type Project struct {
-	XMLName                xml.Name                `xml:"project,omitempty"`
-	XmlNS                  xml.Attr                `xml:"xmlns,attr,omitempty"`
-	XSI                    xml.Attr                `xml:"xmlns:xsi,attr,omitempty"`
-	SchemaLocation         xml.Attr                `xml:"xsi:schemaLocation,attr,omitempty"`
+	XMLName                *xml.Name               `xml:"project,omitempty"`
+	XMLAttrs               *[]xml.Attr             `xml:",any,attr"`
 	ModelVersion           *string                 `xml:"modelVersion,omitempty"`
 	Parent                 *Parent                 `xml:"parent,omitempty"`
 	GroupID                *string                 `xml:"groupId,omitempty"`
@@ -72,6 +71,70 @@ type Project struct {
 
 type Properties struct {
 	Entries map[string]string
+}
+
+const xmlnsAttrName = "xmlns"
+
+// MarshalXML marshals Project to XML.
+//
+// In a good world, we won't need this, but `encoding/xml` is notoriously "strange" when it comes
+// to marshalling namespace-prefixed attributes of tags, and various third-party tools expect namespace information
+// at the POM root element, `project`. Fortunately, the only place where namespace-prefixed attrs are present in POM-s
+// are root elements, thus the fix is pretty... easy.
+func (p *Project) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	srcAttrs := p.XMLAttrs
+	defer func() {
+		// Set initial attrs so that `MarshalXML` doesn't change the current Project
+		p.XMLAttrs = srcAttrs
+	}()
+
+	if srcAttrs != nil {
+		// Modify attributes so that marshalling to XML renders them correctly
+		modifiedAttrs := make([]xml.Attr, len(*srcAttrs))
+
+		// Add all non-prefixed attrs as is, also find Project namespace.
+		// Project namespace usually corresponds to Maven major version (2, 3, 4, etc.)
+		projectNamespace := ""
+		for _, attr := range *srcAttrs {
+			if attr.Name.Space == "" {
+				if attr.Name.Local == xmlnsAttrName {
+					projectNamespace = attr.Value
+				}
+				modifiedAttrs = append(modifiedAttrs, attr)
+			}
+		}
+
+		// A mapping of namespace URL-s to prefixes
+		namespaces := make(map[string]string)
+
+		// Find other namespace declarations
+		for _, attr := range *srcAttrs {
+			if attr.Name.Space == projectNamespace || attr.Name.Space == xmlnsAttrName {
+				prefix, url := attr.Name.Local, attr.Value
+				namespaces[url] = prefix
+				modifiedAttrs = append(modifiedAttrs, xml.Attr{
+					Name:  xml.Name{Local: fmt.Sprintf("%s:%s", xmlnsAttrName, prefix)},
+					Value: url,
+				})
+			}
+		}
+
+		// Add namespace-prefixed attrs
+		for _, attr := range *srcAttrs {
+			if prefix, ok := namespaces[attr.Name.Space]; ok {
+				modifiedAttrs = append(modifiedAttrs, xml.Attr{
+					Name:  xml.Name{Local: fmt.Sprintf("%s:%s", prefix, attr.Name.Local)},
+					Value: attr.Value,
+				})
+			}
+		}
+
+		// Set modified attrs to Project to fix marshalling
+		p.XMLAttrs = &modifiedAttrs
+	}
+
+	// Do marshalling
+	return e.Encode(*p)
 }
 
 func (p *Properties) UnmarshalXML(d *xml.Decoder, start xml.StartElement) (err error) {
